@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>わぎりおくら WXRジェネレーター</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: linear-gradient(135deg, #f8f5f0 0%, #eef5ec 100%); min-height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useCallback } = React;
+
+    const PICS = {
+      howto:   "https://assets.st-note.com/img/1772302037-IHGOmuDjKLolU9d8ZxfeCMtN.png?width=1200",
+      divider: "https://assets.st-note.com/img/1772302283-eylqYPVhwA6TKIkopijcU0Cv.png?width=1200",
+      1: "https://assets.st-note.com/img/1772302077-o28FLgCqyscWKN0VjDi5rGTt.png?width=1200",
+      2: "https://assets.st-note.com/img/1772302091-dT5IY2u3qa9NDnKSFHBLspoC.png?width=1200",
+      3: "https://assets.st-note.com/img/1772302102-jME0x51ywtLuGXAbUPSmnJ7z.png?width=1200",
+      4: "https://assets.st-note.com/img/1772302158-B9PcOYLzoefX4tWDMHsw78bq.png?width=1200",
+      5: "https://assets.st-note.com/img/1772302171-3ORhAv7k9IaecmynpudsNjPX.png?width=1200",
+      6: "https://assets.st-note.com/img/1772302185-dE60SH5urPosLvMyfCNxtblj.png?width=1200",
+      7: "https://assets.st-note.com/img/1772302196-u4UhqFBkaC69E3tY1fGIrARW.png?width=1200",
+      8: "https://assets.st-note.com/img/1772302215-c3AaFkZbGqID7i5s0PBh2EpX.png?width=1200",
+      9: "https://assets.st-note.com/img/1772302232-OCRo4y0im51lcKtJPjp9aGw6.png?width=1200",
+    };
+
+    function mdToHtml(text) {
+      if (!text) return "";
+      return text.trim().split(/\n\n+/).map(block => {
+        block = block.trim();
+        if (!block) return "";
+        if (block.startsWith("|")) {
+          const rows = block.split("\n").filter(r => r.trim() && !r.match(/^\|[-|:\s]+\|$/));
+          const [head, ...body] = rows;
+          const parseCells = (row) => row.split("|").filter((_, i, a) => i > 0 && i < a.length - 1).map(c => c.trim());
+          const thCells = parseCells(head).map(c => `<th>${inlineMd(c)}</th>`).join("");
+          const tdRows = body.map(r => `<tr>${parseCells(r).map(c => `<td>${inlineMd(c)}</td>`).join("")}</tr>`).join("\n");
+          return `<table><thead><tr>${thCells}</tr></thead><tbody>${tdRows}</tbody></table>`;
+        }
+        if (block.startsWith(">")) {
+          const inner = block.split("\n").map(l => l.replace(/^>\s?/, "")).join("\n");
+          return `<blockquote>${mdToHtml(inner)}</blockquote>`;
+        }
+        if (block.match(/^---+$/)) return "";
+        const lines = block.split("\n").map(l => inlineMd(l)).join("<br>\n");
+        return `<p>${lines}</p>`;
+      }).filter(Boolean).join("\n");
+    }
+
+    function inlineMd(text) {
+      return text
+        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*(.+?)\*/g, "<em>$1</em>")
+        .replace(/`(.+?)`/g, "<code>$1</code>");
+    }
+
+    function parseMarkdown(md) {
+      const result = { title: "", dateRange: "", intro: "", tableText: "", overview: "", numbers: [], errors: [] };
+      const titleMatch = md.match(/^#\s+(.+)/m);
+      if (titleMatch) {
+        result.title = titleMatch[1].trim();
+        const drMatch = result.title.match(/（(.+?)）/);
+        if (drMatch) result.dateRange = drMatch[1];
+      } else {
+        result.errors.push("タイトル（# ）が見つかりません");
+      }
+      const wagiriMatch = md.match(/## 🔪 今週のわぎり.+?\n([\s\S]+?)(?=\n## 誕生数)/);
+      if (wagiriMatch) {
+        const wagiriContent = wagiriMatch[1];
+        const tableMatch = wagiriContent.match(/(\|.+\|[\s\S]+?\|.+\|)/);
+        if (tableMatch) result.tableText = tableMatch[1].trim();
+        const afterTable = wagiriContent.slice(tableMatch ? wagiriContent.indexOf(tableMatch[0]) + tableMatch[0].length : 0);
+        result.overview = afterTable.replace(/★はカルマ数.+/g, "").trim();
+      } else {
+        result.errors.push("「今週のわぎり」セクションが見つかりません");
+      }
+      const introEnd = md.indexOf("\n## 🔪");
+      if (introEnd > 0) {
+        const introRaw = md.slice(titleMatch ? titleMatch[0].length : 0, introEnd);
+        result.intro = introRaw.replace(/^#.+\n/, "").trim();
+      }
+      const numSections = md.split(/\n## 誕生数(\d)のあなたへ/).slice(1);
+      for (let i = 0; i < numSections.length; i += 2) {
+        const n = parseInt(numSections[i]);
+        const body = numSections[i + 1] || "";
+        const kwMatch = body.match(/\*\*誕生数\d+のキーワードは、(.+?)\*\*/);
+        const keywords = kwMatch ? kwMatch[1] : "";
+        const analysisMatch = body.match(/###\s*おくらが分析！[^\n]*\n([\s\S]+?)(?=###\s*おくら直伝|$)/);
+        const analysis = analysisMatch ? analysisMatch[1].trim() : "";
+        const practiceMatch = body.match(/###\s*おくら直伝！[^\n]*\n([\s\S]+?)(?=---|\n## |$)/);
+        const practice = practiceMatch ? practiceMatch[1].trim() : "";
+        if (n >= 1 && n <= 9) result.numbers.push({ n, keywords, analysis, practice });
+      }
+      if (result.numbers.length !== 9) result.errors.push(`誕生数セクションが${result.numbers.length}個しか見つかりません（9個必要）`);
+      return result;
+    }
+
+    function buildHtml(parsed) {
+      const parts = [];
+      const img = (url, alt = "") => `<figure><img src="${url}" alt="${alt}" /></figure>`;
+      const div = img(PICS.divider);
+      parts.push(mdToHtml(parsed.intro));
+      parts.push(img(PICS.howto, "あなたの誕生数の出し方"));
+      parts.push(`<p>※他の数秘術鑑定で11や13などの特殊な数字を鑑定された方は、以下のように数字を読み替えてください。<br>11の方 → <strong>2</strong>、22の方 → <strong>4</strong>、33の方 → <strong>6</strong><br>13の方 → <strong>4</strong>、14の方 → <strong>5</strong>、16の方 → <strong>7</strong>、19の方 → <strong>1</strong></p>`);
+      parts.push(`<h2>🔪 今週のわぎり（${parsed.dateRange}）</h2>`);
+      parts.push(`<!-- ここに今週のわぎりおくらエネルギー予報画像を手動で挿入してください -->`);
+      if (parsed.tableText) parts.push(mdToHtml(parsed.tableText));
+      parts.push(`<p>★はカルマ数・マスター数の日です。</p>`);
+      parts.push(div);
+      if (parsed.overview) parts.push(mdToHtml(parsed.overview));
+      parsed.numbers.forEach(({ n, keywords, analysis, practice }) => {
+        parts.push(img(PICS[n], `誕生数${n}`));
+        parts.push(`<h2>誕生数${n}のあなたへ</h2>`);
+        if (keywords) parts.push(`<p><strong>誕生数${n}のキーワードは、${keywords}</strong></p>`);
+        parts.push(`<h3>おくらが分析！　おくら式読み解き</h3>`);
+        parts.push(mdToHtml(analysis));
+        parts.push(`<h3>おくら直伝！　ねばり技能伝承</h3>`);
+        parts.push(mdToHtml(practice));
+        parts.push(div);
+      });
+      parts.push(`<p>また来週、おくらを切りにきてくださいね🌟</p>`);
+      return parts.filter(Boolean).join("\n");
+    }
+
+    function buildWxr(parsed, pubDateStr) {
+      const content = buildHtml(parsed).replace(/>\n+</g, '><');
+      const slug = parsed.title.replace(/[^\w]/g, '-').slice(0, 40);
+      const postDate = new Date(pubDateStr).toISOString().slice(0, 19).replace('T', ' ');
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+  xmlns:excerpt="http://wordpress.org/export/1.2/excerpt/"
+  xmlns:content="http://purl.org/rss/1.0/modules/content/"
+  xmlns:wfw="http://wellformedweb.org/CommentAPI/"
+  xmlns:dc="http://purl.org/dc/elements/1.1/"
+  xmlns:wp="http://wordpress.org/export/1.2/">
+<channel>
+  <title>わぎりおくらの数秘術®</title>
+  <link>https://note.com/wagiriokura</link>
+  <description>わぎりおくらの数秘術占い</description>
+  <language>ja</language>
+  <wp:wxr_version>1.2</wp:wxr_version>
+  <wp:base_site_url>https://note.com/wagiriokura</wp:base_site_url>
+  <wp:base_blog_url>https://note.com/wagiriokura</wp:base_blog_url>
+  <item>
+    <title>${parsed.title}</title>
+    <link>https://note.com/wagiriokura</link>
+    <pubDate>${pubDateStr}</pubDate>
+    <dc:creator>wagiriokura</dc:creator>
+    <guid isPermaLink="false">${slug}</guid>
+    <description></description>
+    <content:encoded><![CDATA[${content}]]></content:encoded>
+    <excerpt:encoded><![CDATA[]]></excerpt:encoded>
+    <wp:post_id>1</wp:post_id>
+    <wp:post_date>${postDate}</wp:post_date>
+    <wp:post_date_gmt>${postDate}</wp:post_date_gmt>
+    <wp:post_modified>${postDate}</wp:post_modified>
+    <wp:post_modified_gmt>${postDate}</wp:post_modified_gmt>
+    <wp:comment_status>open</wp:comment_status>
+    <wp:ping_status>closed</wp:ping_status>
+    <wp:post_name>${slug}</wp:post_name>
+    <wp:status>draft</wp:status>
+    <wp:post_parent>0</wp:post_parent>
+    <wp:menu_order>0</wp:menu_order>
+    <wp:post_type>post</wp:post_type>
+    <wp:post_password></wp:post_password>
+    <wp:is_sticky>0</wp:is_sticky>
+  </item>
+</channel>
+</rss>`;
+    }
+
+    function formatRFC2822(dateStr) {
+      const d = new Date(dateStr);
+      if (isNaN(d)) return new Date().toUTCString();
+      return d.toUTCString();
+    }
+
+    function App() {
+      const [markdown, setMarkdown] = useState("");
+      const [pubDate, setPubDate] = useState(() => {
+        const d = new Date();
+        d.setHours(3, 15, 0, 0);
+        return d.toISOString().slice(0, 16);
+      });
+      const [parsed, setParsed] = useState(null);
+      const [xml, setXml] = useState("");
+      const [step, setStep] = useState("input");
+      const [copied, setCopied] = useState(false);
+
+      const handleParse = useCallback(() => {
+        if (!markdown.trim()) return;
+        const p = parseMarkdown(markdown);
+        setParsed(p);
+        setStep("preview");
+      }, [markdown]);
+
+      const handleGenerate = useCallback(() => {
+        if (!parsed) return;
+        const result = buildWxr(parsed, formatRFC2822(pubDate));
+        setXml(result);
+        setCopied(false);
+        setStep("done");
+      }, [parsed, pubDate]);
+
+      const handleDownload = () => {
+        const blob = new Blob([xml], { type: "application/xml;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const safeDate = pubDate.slice(0, 10).replace(/-/g, "");
+        a.download = `wagiriokura_${safeDate}.xml`;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      const handleCopy = () => {
+        const ta = document.getElementById("xml-output");
+        if (ta) { ta.select(); ta.setSelectionRange(0, 99999); }
+        try {
+          document.execCommand("copy");
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        } catch {
+          navigator.clipboard.writeText(xml).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          });
+        }
+      };
+
+      const handleReset = () => { setMarkdown(""); setParsed(null); setXml(""); setCopied(false); setStep("input"); };
+
+      const S = {
+        wrap: { minHeight: "100vh", background: "linear-gradient(135deg, #f8f5f0 0%, #eef5ec 100%)", fontFamily: "'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif", color: "#2d3a2e" },
+        header: { background: "linear-gradient(90deg, #4a7c59 0%, #6aab6e 100%)", padding: "20px 32px", display: "flex", alignItems: "center", gap: "12px", boxShadow: "0 2px 12px rgba(74,124,89,0.25)" },
+        inner: { maxWidth: "820px", margin: "0 auto", padding: "32px 20px" },
+        card: { background: "#fff", borderRadius: "12px", padding: "20px 24px", marginBottom: "20px", boxShadow: "0 1px 6px rgba(0,0,0,0.07)" },
+        btnGreen: { padding: "14px", borderRadius: "10px", border: "none", background: "linear-gradient(90deg, #4a7c59, #6aab6e)", color: "#fff", fontSize: "15px", fontWeight: "700", cursor: "pointer", boxShadow: "0 4px 16px rgba(74,124,89,0.3)" },
+        btnWhite: { padding: "14px", borderRadius: "10px", border: "1.5px solid #c8e6c9", background: "#fff", color: "#4a7c59", fontSize: "15px", fontWeight: "600", cursor: "pointer" },
+      };
+
+      return (
+        <div style={S.wrap}>
+          <header style={S.header}>
+            <span style={{ fontSize: "28px" }}>🔪</span>
+            <div>
+              <div style={{ color: "#fff", fontWeight: "700", fontSize: "17px" }}>わぎりおくら　WXRジェネレーター</div>
+              <div style={{ color: "rgba(255,255,255,0.75)", fontSize: "12px", marginTop: "2px" }}>テキストを貼るだけで note インポート用XMLが完成</div>
+            </div>
+          </header>
+
+          <div style={S.inner}>
+            {/* ステップ */}
+            <div style={{ display: "flex", marginBottom: "32px", borderRadius: "8px", overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,0.08)" }}>
+              {[["1", "テキスト貼り付け"], ["2", "確認"], ["3", "ダウンロード"]].map(([num, label], i) => {
+                const active = (i === 0 && step === "input") || (i === 1 && step === "preview") || (i === 2 && step === "done");
+                const done = (i === 0 && step !== "input") || (i === 1 && step === "done");
+                return (
+                  <div key={num} style={{ flex: 1, padding: "12px 8px", textAlign: "center", background: active ? "#4a7c59" : done ? "#c8e6c9" : "#fff", color: active ? "#fff" : done ? "#2e7d32" : "#999", fontSize: "13px", fontWeight: active ? "700" : "400", borderRight: i < 2 ? "1px solid #e0e0e0" : "none" }}>
+                    <span style={{ display: "block", fontSize: "18px", fontWeight: "700" }}>{done ? "✓" : num}</span>
+                    {label}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* STEP1 */}
+            {step === "input" && (
+              <div>
+                <div style={S.card}>
+                  <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#4a7c59", marginBottom: "8px" }}>📅 公開日時</label>
+                  <input type="datetime-local" value={pubDate} onChange={e => setPubDate(e.target.value)} style={{ padding: "10px 14px", borderRadius: "8px", border: "1.5px solid #c8e6c9", fontSize: "14px", outline: "none", color: "#2d3a2e", background: "#fafff9", width: "220px" }} />
+                </div>
+                <div style={S.card}>
+                  <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#4a7c59", marginBottom: "10px" }}>📝 Markdownテキストを貼り付け</label>
+                  <textarea value={markdown} onChange={e => setMarkdown(e.target.value)} placeholder={"# わぎりおくらの数秘術占い（3/9〜3/15）\n\n..."} style={{ width: "100%", height: "320px", padding: "14px", borderRadius: "8px", border: "1.5px solid #c8e6c9", fontSize: "13px", fontFamily: "monospace", resize: "vertical", outline: "none", color: "#2d3a2e", background: "#fafff9", lineHeight: "1.6" }} />
+                  <div style={{ textAlign: "right", fontSize: "11px", color: "#bbb", marginTop: "6px" }}>{markdown.length.toLocaleString()} 文字</div>
+                </div>
+                <button onClick={handleParse} disabled={!markdown.trim()} style={{ ...S.btnGreen, width: "100%", padding: "16px", fontSize: "16px", letterSpacing: "0.05em", background: markdown.trim() ? "linear-gradient(90deg, #4a7c59, #6aab6e)" : "#ccc", boxShadow: markdown.trim() ? "0 4px 16px rgba(74,124,89,0.3)" : "none", cursor: markdown.trim() ? "pointer" : "not-allowed" }}>
+                  🔪 切る
+                </button>
+              </div>
+            )}
+
+            {/* STEP2 */}
+            {step === "preview" && parsed && (
+              <div>
+                {parsed.errors.length > 0 && (
+                  <div style={{ background: "#fff3e0", border: "1.5px solid #ffb74d", borderRadius: "10px", padding: "16px 20px", marginBottom: "20px" }}>
+                    <div style={{ fontWeight: "700", color: "#e65100", marginBottom: "6px" }}>⚠️ 注意</div>
+                    {parsed.errors.map((e, i) => <div key={i} style={{ fontSize: "13px", color: "#bf360c" }}>• {e}</div>)}
+                  </div>
+                )}
+                <div style={S.card}>
+                  <div style={{ fontSize: "13px", fontWeight: "700", color: "#4a7c59", marginBottom: "14px" }}>✅ 確認</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                    {[["タイトル", parsed.title || "（未検出）"], ["期間", parsed.dateRange || "（未検出）"], ["週間概要", parsed.overview ? `${parsed.overview.slice(0, 40)}…` : "（未検出）"], ["誕生数", `${parsed.numbers.length} / 9 個`]].map(([k, v]) => (
+                      <div key={k} style={{ background: "#f5faf5", borderRadius: "8px", padding: "12px" }}>
+                        <div style={{ fontSize: "11px", color: "#888", marginBottom: "4px" }}>{k}</div>
+                        <div style={{ fontSize: "13px", fontWeight: "500", wordBreak: "break-all" }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: "14px" }}>
+                    <div style={{ fontSize: "12px", color: "#888", marginBottom: "8px" }}>誕生数検出状況</div>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      {[1,2,3,4,5,6,7,8,9].map(n => {
+                        const found = parsed.numbers.find(x => x.n === n);
+                        return <div key={n} style={{ width: "36px", height: "36px", borderRadius: "50%", background: found ? "#4a7c59" : "#eee", color: found ? "#fff" : "#bbb", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "700", fontSize: "14px" }}>{n}</div>;
+                      })}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "12px" }}>
+                  <button onClick={handleReset} style={{ ...S.btnWhite, flex: 1 }}>← 戻る</button>
+                  <button onClick={handleGenerate} style={{ ...S.btnGreen, flex: 2 }}>🔪 XMLを生成する</button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP3 */}
+            {step === "done" && (
+              <div>
+                <div style={S.card}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                    <div style={{ fontSize: "13px", fontWeight: "700", color: "#4a7c59" }}>🥬 XMLが切れました</div>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button onClick={handleCopy} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: copied ? "#c8e6c9" : "linear-gradient(90deg, #4a7c59, #6aab6e)", color: copied ? "#2e7d32" : "#fff", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>
+                        {copied ? "✓ コピー済" : "📋 コピー"}
+                      </button>
+                      <button onClick={handleDownload} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "linear-gradient(90deg, #4a7c59, #6aab6e)", color: "#fff", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>
+                        💾 保存
+                      </button>
+                    </div>
+                  </div>
+                  <textarea id="xml-output" readOnly value={xml} onClick={e => e.target.select()} style={{ width: "100%", height: "320px", padding: "14px", borderRadius: "8px", border: "1.5px solid #c8e6c9", fontSize: "11px", fontFamily: "monospace", resize: "vertical", outline: "none", color: "#2d3a2e", background: "#fafff9", lineHeight: "1.5" }} />
+                </div>
+                <button onClick={handleReset} style={{ ...S.btnGreen, width: "100%" }}>🔪 次の週を作る</button>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
